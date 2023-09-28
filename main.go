@@ -22,6 +22,60 @@ type Repository struct {
 	CloneURL    string    `json:"clone_url"`
 }
 
+
+func handleArchive(w http.ResponseWriter, r *http.Request) {
+	// Vérifiez la méthode HTTP
+	if r.Method != http.MethodGet {
+		http.Error(w, "Méthode non autorisée", http.StatusMethodNotAllowed)
+		return
+	}
+
+	zipFile, err := os.Create("repositories.zip")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer zipFile.Close()
+
+	zipWriter := zip.NewWriter(zipFile)
+	defer zipWriter.Close()
+
+	// Ajouter des dossiers et des fichiers à l'archive ZIP
+	err = filepath.Walk("clones", func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		header, err := zip.FileInfoHeader(info)
+		if err != nil {
+			return err
+		}
+		header.Name = path
+		writer, err := zipWriter.CreateHeader(header)
+		if err != nil {
+			return err
+		}
+		if info.IsDir() {
+			return nil
+		}
+		fileContent, err := os.ReadFile(path)  
+		if err != nil {
+			return err
+		}
+		_, err = writer.Write(fileContent)
+		if err != nil {
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Write([]byte("Archive créée avec succès"))
+}
+
+
 func main() {
 	githubOrg := os.Getenv("GITHUB_ORG")
 	githubUser := os.Getenv("GITHUB_USER")
@@ -146,48 +200,51 @@ func main() {
 		}
 	// ZIP des dépôts
 
-	zipFile, err := os.Create("repositories.zip")
-	if err != nil {
-		fmt.Println(err)
-		return
-	}
-	defer zipFile.Close()
+	// zipFile, err := os.Create("repositories.zip")
+	// if err != nil {
+	// 	fmt.Println(err)
+	// 	return
+	// }
+	// defer zipFile.Close()
 
-	zipWriter := zip.NewWriter(zipFile)
-	defer zipWriter.Close()
+	// zipWriter := zip.NewWriter(zipFile)
+	// defer zipWriter.Close()
 
-	// Ajouter des dossiers et des fichiers à l'archive ZIP
-	filepath.Walk("clones", func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			fmt.Println(err)
-			return err
-		}
-		header, err := zip.FileInfoHeader(info)
-		if err != nil {
-			fmt.Println(err)
-			return err
-		}
-		header.Name = path
-		writer, err := zipWriter.CreateHeader(header)
-		if err != nil {
-			fmt.Println(err)
-			return err
-		}
-		if info.IsDir() {
-			return nil
-		}
-		fileContent, err := os.ReadFile(path)  
-		if err != nil {
-			fmt.Println(err)
-			return err
-		}
-		_, err = writer.Write(fileContent)
-		if err != nil {
-			fmt.Println(err)
-			return err
-		}
-		return nil
-	})
+	// // Ajouter des dossiers et des fichiers à l'archive ZIP
+	// filepath.Walk("clones", func(path string, info os.FileInfo, err error) error {
+	// 	if err != nil {
+	// 		fmt.Println(err)
+	// 		return err
+	// 	}
+	// 	header, err := zip.FileInfoHeader(info)
+	// 	if err != nil {
+	// 		fmt.Println(err)
+	// 		return err
+	// 	}
+	// 	header.Name = path
+	// 	writer, err := zipWriter.CreateHeader(header)
+	// 	if err != nil {
+	// 		fmt.Println(err)
+	// 		return err
+	// 	}
+	// 	if info.IsDir() {
+	// 		return nil
+	// 	}
+	// 	fileContent, err := os.ReadFile(path)  
+	// 	if err != nil {
+	// 		fmt.Println(err)
+	// 		return err
+	// 	}
+	// 	_, err = writer.Write(fileContent)
+	// 	if err != nil {
+	// 		fmt.Println(err)
+	// 		return err
+	// 	}
+	// 	return nil
+	// })
+
+	http.HandleFunc("/archive", handleArchive)
+	http.ListenAndServe(":8080", nil)
 
 }
 
