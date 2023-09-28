@@ -10,6 +10,9 @@ import (
 	"os/exec"
 	"sort"
 	"time"
+	"strings"
+	"archive/zip"
+	"path/filepath"
 )
 
 type Repository struct {
@@ -47,6 +50,12 @@ func main() {
 		return
 	}
 	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		fmt.Printf("Erreur : %s\n", body)
+		return
+	}	
 
 	body, err := io.ReadAll(resp.Body)
 	if err != nil {
@@ -93,34 +102,92 @@ func main() {
 		}
 	}
 
-	err = os.Mkdir("clones", os.ModePerm)
-	if err != nil {
-		fmt.Println(err)
-		return
-	}
-
-
-		// ...
 		err = os.Mkdir("clones", os.ModePerm)
 		if err != nil {
 			fmt.Println(err)
 			return
 		}
 	
-		token := os.Getenv("GITHUB_TOKEN")  // Assurez-vous de définir cette variable d'environnement
+		token := os.Getenv("GITHUB_TOKEN") 
 	
 		for _, repo := range repos {
-			cmd := exec.Command("git", "clone", fmt.Sprintf("https://%s:x-oauth-basic@github.com/user/%s.git", token, repo.Name))
-			cmd.Dir = "clones"  // Définir le répertoire dans lequel la commande sera exécutée
+			owner := githubUser
+			if owner == "" {
+				owner = githubOrg
+			}
+			cmd := exec.Command("git", "clone", fmt.Sprintf("https://%s:x-oauth-basic@github.com/%s/%s.git", token, owner, repo.Name))
+			cmd.Dir = "clones"
 			err := cmd.Run()
 			if err != nil {
 				fmt.Printf("Erreur lors du clonage du dépôt %s: %v\n", repo.Name, err)
-			} else {
-				fmt.Printf("Dépôt %s cloné avec succès\n", repo.Name)
+				continue  // Continue avec le prochain repo si le clonage échoue 
+			} 
+			fmt.Printf("Dépôt %s cloné avec succès\n", repo.Name)
+
+			repoDir := fmt.Sprintf("clones/%s", repo.Name)
+			cmd = exec.Command("git", "-C", repoDir, "fetch")
+			err = cmd.Run()
+			if err != nil {
+				fmt.Printf("Erreur lors de l'exécution de git fetch dans le dépôt %s: %v\n", repo.Name, err)
+			}
+
+			cmd = exec.Command("git", "-C", repoDir, "for-each-ref", "--sort=-committerdate", "--count=1", "--format=%(refname:short)", "refs/heads")
+			branch, err := cmd.Output()
+			if err != nil {
+				fmt.Printf("Erreur lors de l'obtention de la dernière branche modifiée dans le dépôt %s: %v\n", repo.Name, err)
+				continue
+				}
+
+			cmd = exec.Command("git", "-C", repoDir, "pull", "origin", strings.TrimSpace(string(branch)))
+			err = cmd.Run()
+			if err != nil {
+				fmt.Printf("Erreur lors de l'exécution de git pull sur la dernière branche modifiée dans le dépôt %s: %v\n", repo.Name, err)
 			}
 		}
-		// ...
-	
+	// ZIP des dépôts
 
-	
+	zipFile, err := os.Create("repositories.zip")
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	defer zipFile.Close()
+
+	zipWriter := zip.NewWriter(zipFile)
+	defer zipWriter.Close()
+
+	// Ajouter des dossiers et des fichiers à l'archive ZIP
+	filepath.Walk("clones", func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			fmt.Println(err)
+			return err
+		}
+		header, err := zip.FileInfoHeader(info)
+		if err != nil {
+			fmt.Println(err)
+			return err
+		}
+		header.Name = path
+		writer, err := zipWriter.CreateHeader(header)
+		if err != nil {
+			fmt.Println(err)
+			return err
+		}
+		if info.IsDir() {
+			return nil
+		}
+		fileContent, err := os.ReadFile(path)  
+		if err != nil {
+			fmt.Println(err)
+			return err
+		}
+		_, err = writer.Write(fileContent)
+		if err != nil {
+			fmt.Println(err)
+			return err
+		}
+		return nil
+	})
+
 }
+
